@@ -1645,7 +1645,7 @@ final class VideoUnit: NSObject {
         guard let format else {
             return
         }
-        logger.debug("Selected video format: \(format)")
+        logger.info("xxx Selected video format: \(format.supportedDynamicAspectRatios)")
         do {
             try device.lockForConfiguration()
             if device.activeFormat != format {
@@ -1658,6 +1658,18 @@ final class VideoUnit: NSObject {
             } else {
                 device.setFps(frameRate: fps)
                 processor?.delegate?.streamSelectedFps(fps: fps, auto: false)
+            }
+            if #available(iOS 26, *) {
+                let ratio: AVCaptureDevice.AspectRatio
+                if captureSize.isPortrait() {
+                    ratio = .ratio9x16
+                } else {
+                    ratio = .ratio16x9
+                }
+                if format.supportedDynamicAspectRatios.contains(ratio) {
+                    logger.info("xxx set dynamic aspect ratio \(ratio)")
+                    device.setDynamicAspectRatio(ratio)
+                }
             }
             device.unlockForConfiguration()
         } catch {
