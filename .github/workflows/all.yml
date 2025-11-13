@@ -24,4 +24,10 @@ jobs:
         run: |
           xcodebuild -list
           xcodebuild -downloadComponent MetalToolchain
-          xcodebuild -scheme Moblin -skipPackagePluginValidation build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+          xcodebuild \
+              -scheme Moblin \
+              -destination generic/platform=iOS \
+              -skipPackagePluginValidation \
+              build \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO
