@@ -23,10 +23,10 @@ jobs:
       - name: Build
         run: |
           xcodebuild -list
+          xcodebuild -downloadPlatform iOS
           xcodebuild -downloadComponent MetalToolchain
           xcodebuild \
               -scheme Moblin \
-              -destination generic/platform=iOS \
               -skipPackagePluginValidation \
               build \
               CODE_SIGN_IDENTITY="" \
