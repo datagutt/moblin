@@ -81,6 +81,10 @@ class ByteWriter {
         writeBytes(value.bigEndian.data)
     }
 
+    func writeInt64(_ value: Int64) {
+        writeBytes(value.bigEndian.data)
+    }
+
     func writeDouble(_ value: Double) {
         writeBytes(Data(value.data.reversed()))
     }

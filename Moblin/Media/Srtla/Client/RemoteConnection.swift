@@ -65,6 +65,10 @@ class RemoteConnection {
     let interface: NWInterface?
     private var dataPacketsToSend: [Data] = []
     private var totalDataSentByteCount: UInt64 = 0
+    private var nakCount: UInt32 = 0
+    private var bitrateStartTime = ContinuousClock.now
+    private var bitrateBytesSent: UInt64 = 0
+    private let connectionId: UInt32 = .random(in: 0 ... UInt32.max)
 
     private var nullPacket: Data = {
         var packet = Data(count: MpegTsPacket.size)
@@ -224,6 +228,7 @@ class RemoteConnection {
         if packetsInFlight.remove(sn) == nil {
             return
         }
+        nakCount += 1
         windowSize = max(windowSize - windowDecrement, windowMinimum * windowMultiply)
     }
 
@@ -369,9 +374,11 @@ class RemoteConnection {
                 }
                 sendDataPacketInternal(packet: paddedPacket)
                 totalDataSentByteCount += UInt64(paddedPacket.count)
+                bitrateBytesSent += UInt64(paddedPacket.count)
             } else {
                 sendDataPacketInternal(packet: packet)
                 totalDataSentByteCount += UInt64(packet.count)
+                bitrateBytesSent += UInt64(packet.count)
             }
         } else {
             sendControlPacketInternal(packet: packet)
@@ -406,9 +413,25 @@ class RemoteConnection {
     }
 
     private func sendSrtlaKeepalive() {
-        var packet = createSrtlaPacket(type: .keepalive, length: srtControlTypeSize + 8)
-        packet.setInt64Be(value: getKeepAliveTime(), offset: srtControlTypeSize)
+        let timestamp = getKeepAliveTime()
+        let now = ContinuousClock.now
+        let elapsedSeconds = bitrateStartTime.duration(to: now).seconds
+        var bitrateBytesPerSec: UInt32 = 0
+        if elapsedSeconds > 0 {
+            bitrateBytesPerSec = UInt32(Double(bitrateBytesSent) / elapsedSeconds)
+        }
+        let info = SrtlaConnectionInfo(
+            connId: connectionId,
+            window: Int32(windowSize),
+            inFlight: Int32(packetsInFlight.count),
+            rttUs: UInt32(rtt),
+            nakCount: nakCount,
+            bitrateBytesPerSec: bitrateBytesPerSec
+        )
+        let packet = createSrtlaKeepalivePacketExt(timestamp: timestamp, info: info)
         sendPacket(packet: packet)
+        bitrateBytesSent = 0
+        bitrateStartTime = now
     }
 
     private func getKeepAliveTime() -> Int64 {
