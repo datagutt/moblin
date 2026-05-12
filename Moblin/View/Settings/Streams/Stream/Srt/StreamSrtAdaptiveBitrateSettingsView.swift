@@ -75,6 +75,11 @@ struct StreamSrtAdaptiveBitrateSettingsView: View {
         model.updateAdaptiveBitrateSrt(srt: srt)
     }
 
+    private func submitPredictiveMinimumBitrate(value: Float) {
+        adaptiveBitrate.predictiveSettings.minimumBitrate = value / 1000
+        model.updateAdaptiveBitrateSrt(srt: srt)
+    }
+
     var body: some View {
         Form {
             Section {
@@ -226,6 +231,29 @@ struct StreamSrtAdaptiveBitrateSettingsView: View {
                                maximum: 2_000_000,
                                step: 50000,
                                onSubmit: submitBelaboxMinimumBitrate,
+                               width: 80,
+                               format: formatMinimumBitrate)
+                } header: {
+                    Text("Minimum bitrate")
+                } footer: {
+                    VStack(alignment: .leading) {
+                        Text("The minimum encoder bitrate.")
+                        Text("250 Kbps by default.")
+                    }
+                }
+            } else if adaptiveBitrate.algorithm == .predictive {
+                Section {
+                    HStack {
+                        Text("⚠️")
+                        Text("Experimental. Predictive holds before loss appears.")
+                    }
+                }
+                Section {
+                    SliderView(value: 1000 * adaptiveBitrate.predictiveSettings.minimumBitrate,
+                               minimum: 50000,
+                               maximum: 2_000_000,
+                               step: 50000,
+                               onSubmit: submitPredictiveMinimumBitrate,
                                width: 80,
                                format: formatMinimumBitrate)
                 } header: {

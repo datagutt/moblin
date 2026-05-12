@@ -289,6 +289,7 @@ enum SettingsStreamSrtAdaptiveBitrateAlgorithm: Codable, CaseIterable {
     case fastIrl
     case slowIrl
     case customIrl
+    case predictive
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -300,6 +301,8 @@ enum SettingsStreamSrtAdaptiveBitrateAlgorithm: Codable, CaseIterable {
             self = .slowIrl
         } else if container.contains(CodingKeys.customIrl) {
             self = .customIrl
+        } else if container.contains(CodingKeys.predictive) {
+            self = .predictive
         } else {
             self = .belabox
         }
@@ -315,6 +318,8 @@ enum SettingsStreamSrtAdaptiveBitrateAlgorithm: Codable, CaseIterable {
             String(localized: "Slow IRL")
         case .customIrl:
             String(localized: "Custom IRL")
+        case .predictive:
+            String(localized: "Predictive")
         }
     }
 }
@@ -427,11 +432,38 @@ class SettingsStreamSrtAdaptiveBitrateBelaboxSettings: Codable {
     }
 }
 
+class SettingsStreamSrtAdaptiveBitratePredictiveSettings: Codable {
+    var minimumBitrate: Float = 250
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case minimumBitrate
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.minimumBitrate, minimumBitrate)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        minimumBitrate = container.decode(.minimumBitrate, Float.self, 250)
+    }
+
+    func clone() -> SettingsStreamSrtAdaptiveBitratePredictiveSettings {
+        let new = SettingsStreamSrtAdaptiveBitratePredictiveSettings()
+        new.minimumBitrate = minimumBitrate
+        return new
+    }
+}
+
 class SettingsStreamSrtAdaptiveBitrate: Codable, ObservableObject {
     @Published var algorithm: SettingsStreamSrtAdaptiveBitrateAlgorithm = .belabox
     var fastIrlSettings: SettingsStreamSrtAdaptiveBitrateFastIrlSettings = .init()
     var customSettings: SettingsStreamSrtAdaptiveBitrateCustomSettings = .init()
     var belaboxSettings: SettingsStreamSrtAdaptiveBitrateBelaboxSettings = .init()
+    var predictiveSettings: SettingsStreamSrtAdaptiveBitratePredictiveSettings = .init()
 
     init() {}
 
@@ -439,7 +471,8 @@ class SettingsStreamSrtAdaptiveBitrate: Codable, ObservableObject {
         case algorithm,
              fastIrlSettings,
              customSettings,
-             belaboxSettings
+             belaboxSettings,
+             predictiveSettings
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -448,6 +481,7 @@ class SettingsStreamSrtAdaptiveBitrate: Codable, ObservableObject {
         try container.encode(.fastIrlSettings, fastIrlSettings)
         try container.encode(.customSettings, customSettings)
         try container.encode(.belaboxSettings, belaboxSettings)
+        try container.encode(.predictiveSettings, predictiveSettings)
     }
 
     required init(from decoder: any Decoder) throws {
@@ -468,6 +502,11 @@ class SettingsStreamSrtAdaptiveBitrate: Codable, ObservableObject {
             SettingsStreamSrtAdaptiveBitrateBelaboxSettings.self,
             .init()
         )
+        predictiveSettings = container.decode(
+            .predictiveSettings,
+            SettingsStreamSrtAdaptiveBitratePredictiveSettings.self,
+            .init()
+        )
     }
 
     func clone() -> SettingsStreamSrtAdaptiveBitrate {
@@ -476,6 +515,7 @@ class SettingsStreamSrtAdaptiveBitrate: Codable, ObservableObject {
         new.fastIrlSettings = fastIrlSettings.clone()
         new.customSettings = customSettings.clone()
         new.belaboxSettings = belaboxSettings.clone()
+        new.predictiveSettings = predictiveSettings.clone()
         return new
     }
 }

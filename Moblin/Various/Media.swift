@@ -279,6 +279,8 @@ final class Media: NSObject, @unchecked Sendable {
             adaptiveBitrate = AdaptiveBitrateSrtFight(targetBitrate: targetBitrate, delegate: self)
         case .belabox:
             adaptiveBitrate = AdaptiveBitrateSrtBelabox(targetBitrate: targetBitrate, delegate: self)
+        case .predictive:
+            adaptiveBitrate = AdaptiveBitrateSrtPredictive(targetBitrate: targetBitrate, delegate: self)
         case nil:
             adaptiveBitrate = nil
         }
@@ -317,7 +319,7 @@ final class Media: NSObject, @unchecked Sendable {
         guard srtConnected else {
             return nil
         }
-        if adaptiveBitrate is AdaptiveBitrateSrtBelabox {
+        if adaptiveBitrate is AdaptiveBitrateSrtBelabox || adaptiveBitrate is AdaptiveBitrateSrtPredictive {
             return updateAdaptiveBitrateSrtBela(overlay: overlay, relaxed: relaxed, is200MsTick: is200MsTick)
         } else if is200MsTick {
             return updateAdaptiveBitrateSrtFight(overlay: overlay)
@@ -360,7 +362,9 @@ final class Media: NSObject, @unchecked Sendable {
             transportBitrate: streamTransportBitrate(),
             latency: latency,
             mbpsSendRate: stats.mbpsSendRate,
-            relaxed: relaxed
+            relaxed: relaxed,
+            pktRetransTotal: stats.pktRetransTotal,
+            pktSndDropTotal: stats.pktSndDropTotal
         ))
         if overlay {
             if is200MsTick {

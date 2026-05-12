@@ -748,6 +748,11 @@ final class Model: NSObject, ObservableObject, @unchecked Sendable {
             settings
                 .minimumBitrate = Int64(srt.adaptiveBitrate.belaboxSettings.minimumBitrate * 1000)
             media.setAdaptiveBitrateSettings(settings: settings)
+        case .predictive:
+            var settings = adaptiveBitratePredictiveSettings
+            settings
+                .minimumBitrate = Int64(srt.adaptiveBitrate.predictiveSettings.minimumBitrate * 1000)
+            media.setAdaptiveBitrateSettings(settings: settings)
         }
     }
 

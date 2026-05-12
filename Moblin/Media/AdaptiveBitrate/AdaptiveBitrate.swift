@@ -15,6 +15,32 @@ struct StreamStats {
     let latency: Int32?
     let mbpsSendRate: Double?
     let relaxed: Bool?
+    // Cumulative SRT loss counters. Optional so callers using protocols
+    // without these signals (RTMP, RIST experiment) can omit them; the
+    // predictive algorithm uses deltas of pktSndDropTotal as a goodput
+    // shortfall signal that catches silent drops which RTT and PIF miss.
+    let pktRetransTotal: Int32?
+    let pktSndDropTotal: Int32?
+
+    init(
+        rttMs: Double,
+        packetsInFlight: Double,
+        transportBitrate: Int64?,
+        latency: Int32?,
+        mbpsSendRate: Double?,
+        relaxed: Bool?,
+        pktRetransTotal: Int32? = nil,
+        pktSndDropTotal: Int32? = nil
+    ) {
+        self.rttMs = rttMs
+        self.packetsInFlight = packetsInFlight
+        self.transportBitrate = transportBitrate
+        self.latency = latency
+        self.mbpsSendRate = mbpsSendRate
+        self.relaxed = relaxed
+        self.pktRetransTotal = pktRetransTotal
+        self.pktSndDropTotal = pktSndDropTotal
+    }
 
     // To not push too high bitrate after static scene. The encoder may output way
     // lower bitrate than configured.
