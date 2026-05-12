@@ -32,14 +32,14 @@ private let retransFastDecreaseThreshold: Double = 0.05
 private let retransSlowDecreaseThreshold: Double = 0.015
 
 // rtt / rtPropMs ratios that trigger cuts.
+//
+// Fast cuts read instantaneous rtt: a single huge spike is a real
+// catastrophe regardless of smoothing.
+// Slow cuts read kalman-smoothed rtt: single-sample wifi jitter (12->22ms
+// is normal kernel/queue noise on a healthy link) shouldn't fire a cut.
+// Real congestion sustains and the smoothed value converges upward.
 private let rttFastDecreaseRatio: Double = 2.5
 private let rttSlowDecreaseRatio: Double = 1.6
-// Standalone rtt threshold (no retrans corroboration) for slow decreases.
-// Pure rtt jitter on a no-loss link can hit ~1.85x of rtPropMs on a
-// healthy wifi/lan; require a stronger signal before cutting without
-// loss to back it up.
-private let rttSlowDecreaseStandaloneRatio: Double = 2.2
-private let retransSlowDecreaseCorroborationThreshold: Double = 0.005
 
 // Panic if rtt eats this fraction of the SRT latency budget.
 private let panicLatencyFraction: Double = 0.4
@@ -181,7 +181,13 @@ class AdaptiveBitrateSrtPredictive: AdaptiveBitrate {
         let srtLatency: Double
         let currentTime: ContinuousClock.Instant
         let retransRatio: Double
-        let rttRatio: Double // rtt / rtPropMs
+        // Two flavours of the same ratio so each decision can pick the
+        // signal that fits its purpose. Fast/catastrophic cuts use raw
+        // (a real spike is a real spike). Slow cuts use smoothed
+        // (sustained elevation matters; single-sample wifi jitter
+        // doesn't).
+        let rttRatio: Double         // raw rtt / rtPropMs
+        let smoothedRttRatio: Double // rttKalman.value / rtPropMs (raw fallback at startup)
     }
 
     private func updateBitrate(stats: StreamStats) {
@@ -200,13 +206,16 @@ class AdaptiveBitrateSrtPredictive: AdaptiveBitrate {
             now: currentTime
         )
         logPressureBandIfChanged()
+        let rttPropDenom = max(Self.rtPropFloor, rtPropMs)
+        let smoothedRtt = rttKalman.initialized ? rttKalman.value : rtt
         let context = RateContext(
             rtt: rtt,
             pif: pif,
             srtLatency: Double(stats.latency ?? defaultSrtLatency),
             currentTime: currentTime,
             retransRatio: capacity.retransRatio,
-            rttRatio: rtt / max(Self.rtPropFloor, rtPropMs)
+            rttRatio: rtt / rttPropDenom,
+            smoothedRttRatio: smoothedRtt / rttPropDenom
         )
         let nextPhase = selectPhase(context: context)
         if nextPhase != phase {
@@ -290,20 +299,15 @@ class AdaptiveBitrateSrtPredictive: AdaptiveBitrate {
             if heavyRetrans || heavyRtt {
                 return .decreaseFast
             }
-            // Slow decrease conditions:
-            //   - mild retrans on its own (loss is real)
-            //   - mild rtt elevation corroborated by some retrans signal
-            //     (rtt + small loss = early congestion)
-            //   - strong rtt elevation on its own (clear queue buildup
-            //     even if loss hasn't appeared yet)
-            // Pure mild rtt with zero loss is typical wifi/lan jitter
-            // and was firing spurious cuts on a clean network.
+            // Slow decrease reads the kalman-smoothed rtt ratio instead
+            // of the raw one. on a healthy wifi/lan the raw value
+            // bounces e.g. 12->22->12ms tick over tick from kernel and
+            // queue jitter, which trips a 1.6x threshold without any
+            // real congestion. the smoothed value sits near the actual
+            // baseline and only climbs when elevation persists.
             let mildRetrans = context.retransRatio > retransSlowDecreaseThreshold
-            let mildRtt = context.rttRatio > rttSlowDecreaseRatio
-            let strongRttStandalone = context.rttRatio > rttSlowDecreaseStandaloneRatio
-            let rttCorroborated = mildRtt &&
-                context.retransRatio > retransSlowDecreaseCorroborationThreshold
-            if mildRetrans || strongRttStandalone || rttCorroborated {
+            let smoothedRttElevated = context.smoothedRttRatio > rttSlowDecreaseRatio
+            if mildRetrans || smoothedRttElevated {
                 // Pressure veto: if we're well below recentPeakBps,
                 // the link clearly has room and a cut here would lock
                 // us low.
