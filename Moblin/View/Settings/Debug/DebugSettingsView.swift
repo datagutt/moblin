@@ -110,6 +110,7 @@ struct DebugSettingsView: View {
                     }
                 }
                 Toggle(String("Enhanced Moblin SRT"), isOn: $debug.enhancedMoblinSrt)
+                Toggle(String("SRTLA predictive scheduler"), isOn: $debug.srtlaPredictiveScheduler)
             } header: {
                 Text("Experimental")
             }

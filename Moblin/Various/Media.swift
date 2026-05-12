@@ -198,7 +198,8 @@ final class Media: NSObject, @unchecked Sendable {
         mpegtsPacketsPerPacket: Int,
         networkInterfaceNames: [SettingsNetworkInterfaceName],
         connectionPriorities: SettingsStreamSrtConnectionPriorities,
-        dnsLookupStrategy: SettingsDnsLookupStrategy
+        dnsLookupStrategy: SettingsDnsLookupStrategy,
+        predictiveScheduler: Bool = false
     ) {
         srtUrl = url
         srtInitStream(
@@ -213,6 +214,7 @@ final class Media: NSObject, @unchecked Sendable {
             networkInterfaceNames: networkInterfaceNames,
             connectionPriorities: connectionPriorities
         )
+        srtlaClient?.setPredictiveScheduler(predictiveScheduler)
         srtlaClient!.start(uri: url, timeout: reconnectTime + 1, dnsLookupStrategy: dnsLookupStrategy)
         srtTransportBitrate = Int64(targetBitrate)
     }

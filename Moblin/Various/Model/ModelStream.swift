@@ -219,7 +219,8 @@ extension Model {
             mpegtsPacketsPerPacket: srt.mpegtsPacketsPerPacket(),
             networkInterfaceNames: database.networkInterfaceNames,
             connectionPriorities: srt.connectionPriorities,
-            dnsLookupStrategy: srt.dnsLookupStrategy
+            dnsLookupStrategy: srt.dnsLookupStrategy,
+            predictiveScheduler: database.debug.srtlaPredictiveScheduler
         )
         updateAdaptiveBitrateSrt(srt: srt)
     }

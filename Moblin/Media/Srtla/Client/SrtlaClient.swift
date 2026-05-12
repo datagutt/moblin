@@ -51,6 +51,7 @@ class SrtlaClient: NSObject, @unchecked Sendable {
     private var connectionPriorities: [SettingsStreamSrtConnectionPriority]
     private var latestFlushDataPacketsTime = ContinuousClock.now
     private let srtImplementation: SettingsStreamSrtImplementation
+    private var predictiveScheduler: Bool = false
 
     init(
         delegate: any SrtlaDelegate,
@@ -83,6 +84,10 @@ class SrtlaClient: NSObject, @unchecked Sendable {
 
     deinit {
         logger.debug("srtla: srtla deinit")
+    }
+
+    func setPredictiveScheduler(_ enabled: Bool) {
+        predictiveScheduler = enabled
     }
 
     func start(uri: String, timeout: Double, dnsLookupStrategy: SettingsDnsLookupStrategy) {
@@ -415,6 +420,15 @@ class SrtlaClient: NSObject, @unchecked Sendable {
     }
 
     private func selectRemoteConnection() -> RemoteConnection? {
+        if predictiveScheduler {
+            if let predicted = selectByPredictedArrival() {
+                return predicted
+            }
+        }
+        return selectByGreedyScore()
+    }
+
+    private func selectByGreedyScore() -> RemoteConnection? {
         var selectedConnection: RemoteConnection?
         var selectedScore = -1
         for connection in remoteConnections {
@@ -426,7 +440,42 @@ class SrtlaClient: NSObject, @unchecked Sendable {
         }
         return selectedConnection
     }
+
+    // Earliest-delivery-path-first: choose the connection whose predicted
+    // arrival time for a fresh packet is lowest. Connections with no
+    // capacity sample yet return nil and are deferred to greedy fallback,
+    // which keeps probing them via the existing window-based logic.
+    //
+    // Head-of-line blocking guard: even if a slow-rtt link has an empty
+    // queue and would technically deliver next packet quickly, ordering
+    // packets onto it ahead of in-flight packets on a fast-rtt link
+    // forces the srt receiver to reorder, eating into the latency budget.
+    // Skip any link whose one-way-delay is meaningfully worse than the
+    // best, except when nothing better is available.
+    private func selectByPredictedArrival() -> RemoteConnection? {
+        var candidates: [(RemoteConnection, Double, Double)] = []
+        var bestOwd = Double.infinity
+        for connection in remoteConnections {
+            guard let arrival = connection.predictedArrivalMs() else {
+                continue
+            }
+            let owd = Double(connection.rtt) / 2.0
+            candidates.append((connection, arrival, owd))
+            if owd < bestOwd {
+                bestOwd = owd
+            }
+        }
+        guard !candidates.isEmpty else {
+            return nil
+        }
+        let owdThreshold = bestOwd + holBlockingThresholdMs
+        let allowed = candidates.filter { $0.2 <= owdThreshold }
+        let pool = allowed.isEmpty ? candidates : allowed
+        return pool.min(by: { $0.1 < $1.1 })?.0
+    }
 }
+
+private let holBlockingThresholdMs: Double = 50
 
 extension SrtlaClient: RemoteConnectionDelegate {
     func remoteConnectionOnSocketConnected(connection: RemoteConnection) {

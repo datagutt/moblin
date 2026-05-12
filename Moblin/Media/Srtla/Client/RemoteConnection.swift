@@ -66,6 +66,20 @@ class RemoteConnection: @unchecked Sendable {
     private var dataPacketsToSend: [Data] = []
     private var totalDataSentByteCount: UInt64 = 0
 
+    // Health and capacity observability. Recomputed on each ack/nak, read
+    // by stats and (when enabled) the alternative scheduler. Purely
+    // additive: the existing score() based scheduler ignores these.
+    private var nakCount: Int = 0
+    private var nakWindowStart: ContinuousClock.Instant = .now
+    private var nakRateEwma: Double = 0
+    private var rttSmooth: Double = 0
+    private var rttJitter: Double = 0
+    private var ackedBytesThisWindow: UInt64 = 0
+    private var capacityWindowStart: ContinuousClock.Instant = .now
+    private var deliveryRateBpsEstimate: Double = 0
+    private var peakDeliveryRateBps: Double = 0
+    private let mtuBytesAttributedPerAck: Int
+
     private var nullPacket: Data = {
         var packet = Data(count: MpegTsPacket.size)
         packet
@@ -113,6 +127,9 @@ class RemoteConnection: @unchecked Sendable {
         self.priority = priority
         self.relayId = relayId
         self.relayName = relayName
+        // Each ACK clears one full mpegts-packet group from in-flight.
+        // 1316 = 7 * 188 (7 ts packets per srt payload), plus the srt header.
+        mtuBytesAttributedPerAck = 16 + (mpegtsPacketsPerPacket * MpegTsPacket.size)
     }
 
     deinit {
@@ -217,7 +234,12 @@ class RemoteConnection: @unchecked Sendable {
     }
 
     func handleSrtAckSn(sn ackSn: UInt32) {
+        let prevCount = packetsInFlight.count
         packetsInFlight = packetsInFlight.filter { sn in !isSrtSnAcked(sn: sn, ackSn: ackSn) }
+        let removed = prevCount - packetsInFlight.count
+        if removed > 0 {
+            attributeAckedBytes(packets: removed)
+        }
     }
 
     func handleSrtNakSn(sn: UInt32) {
@@ -225,6 +247,7 @@ class RemoteConnection: @unchecked Sendable {
             return
         }
         windowSize = max(windowSize - windowDecrement, windowMinimum * windowMultiply)
+        nakCount += 1
     }
 
     func handleSrtlaAckSn(sn: UInt32) {
@@ -232,8 +255,95 @@ class RemoteConnection: @unchecked Sendable {
             if packetsInFlight.count * windowMultiply > windowSize {
                 windowSize += windowIncrement - 1
             }
+            attributeAckedBytes(packets: 1)
         }
         windowSize = min(windowSize + 1, windowMaximum * windowMultiply)
+    }
+
+    private func attributeAckedBytes(packets: Int) {
+        ackedBytesThisWindow += UInt64(packets * mtuBytesAttributedPerAck)
+        let now = ContinuousClock.now
+        let elapsed = capacityWindowStart.duration(to: now)
+        if elapsed >= .seconds(1) {
+            let elapsedSeconds = max(0.001, elapsed.seconds)
+            let sample = Double(ackedBytesThisWindow) / elapsedSeconds
+            // Asymmetric ewma so the estimate climbs cautiously but reflects
+            // a sudden capacity drop quickly.
+            if sample > deliveryRateBpsEstimate {
+                deliveryRateBpsEstimate = deliveryRateBpsEstimate * 0.7 + sample * 0.3
+            } else {
+                deliveryRateBpsEstimate = deliveryRateBpsEstimate * 0.5 + sample * 0.5
+            }
+            peakDeliveryRateBps = max(peakDeliveryRateBps * 0.995, deliveryRateBpsEstimate)
+            ackedBytesThisWindow = 0
+            capacityWindowStart = now
+            updateNakRate(elapsedSeconds: elapsedSeconds)
+        }
+    }
+
+    private func updateNakRate(elapsedSeconds: Double) {
+        let sample = Double(nakCount) / elapsedSeconds
+        nakCount = 0
+        nakRateEwma = nakRateEwma * 0.7 + sample * 0.3
+    }
+
+    // 0..100 link health score. Blends rtt level, rtt jitter, nak rate, and
+    // window pressure. Read by stats; alternative scheduler may consume it.
+    // Returns -1 if not yet usable (no rtt, not registered, disabled).
+    func health() -> Int {
+        guard state == .registered, isEnabled() else {
+            return -1
+        }
+        if rtt == 0 {
+            return 50
+        }
+        updateRttSmoothing()
+        let rttScore = max(0.0, 1.0 - rttSmooth / 500.0)
+        let jitterScore = max(0.0, 1.0 - rttJitter / 100.0)
+        let nakScore = max(0.0, 1.0 - nakRateEwma / 20.0)
+        let inflightCapacity = max(1, windowSize / windowMultiply)
+        let pifPressure = min(1.0, Double(packetsInFlight.count) / Double(inflightCapacity))
+        let windowScore = max(0.0, 1.0 - pifPressure)
+        let composite = 0.35 * rttScore + 0.20 * jitterScore + 0.30 * nakScore + 0.15 * windowScore
+        return Int(composite * 100)
+    }
+
+    private func updateRttSmoothing() {
+        let sample = Double(rtt)
+        if rttSmooth == 0 {
+            rttSmooth = sample
+            rttJitter = 0
+            return
+        }
+        let delta = abs(sample - rttSmooth)
+        rttSmooth = rttSmooth * 0.9 + sample * 0.1
+        rttJitter = rttJitter * 0.9 + delta * 0.1
+    }
+
+    func getDeliveryRateBpsEstimate() -> Double {
+        deliveryRateBpsEstimate
+    }
+
+    func getPeakDeliveryRateBps() -> Double {
+        peakDeliveryRateBps
+    }
+
+    // Predicted milliseconds until a packet sent now would arrive at the
+    // receiver. Composed of queue time (in-flight bytes drained at the
+    // measured delivery rate) plus a one-way-delay approximation (rtt/2).
+    // Returns nil when the link is unusable or has no capacity sample yet
+    // so the scheduler can either fall back to greedy or bias toward
+    // sampling the unknown link.
+    func predictedArrivalMs() -> Double? {
+        guard state == .registered, isEnabled() else {
+            return nil
+        }
+        guard deliveryRateBpsEstimate > 0 else {
+            return nil
+        }
+        let inFlightBytes = Double(packetsInFlight.count * mtuBytesAttributedPerAck)
+        let queueMs = (inFlightBytes / deliveryRateBpsEstimate) * 1000.0
+        return queueMs + Double(rtt) / 2.0
     }
 
     func logStatistics() {
