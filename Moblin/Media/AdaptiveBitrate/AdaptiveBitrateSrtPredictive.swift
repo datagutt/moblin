@@ -34,6 +34,12 @@ private let retransSlowDecreaseThreshold: Double = 0.015
 // rtt / rtPropMs ratios that trigger cuts.
 private let rttFastDecreaseRatio: Double = 2.5
 private let rttSlowDecreaseRatio: Double = 1.6
+// Standalone rtt threshold (no retrans corroboration) for slow decreases.
+// Pure rtt jitter on a no-loss link can hit ~1.85x of rtPropMs on a
+// healthy wifi/lan; require a stronger signal before cutting without
+// loss to back it up.
+private let rttSlowDecreaseStandaloneRatio: Double = 2.2
+private let retransSlowDecreaseCorroborationThreshold: Double = 0.005
 
 // Panic if rtt eats this fraction of the SRT latency budget.
 private let panicLatencyFraction: Double = 0.4
@@ -284,9 +290,20 @@ class AdaptiveBitrateSrtPredictive: AdaptiveBitrate {
             if heavyRetrans || heavyRtt {
                 return .decreaseFast
             }
+            // Slow decrease conditions:
+            //   - mild retrans on its own (loss is real)
+            //   - mild rtt elevation corroborated by some retrans signal
+            //     (rtt + small loss = early congestion)
+            //   - strong rtt elevation on its own (clear queue buildup
+            //     even if loss hasn't appeared yet)
+            // Pure mild rtt with zero loss is typical wifi/lan jitter
+            // and was firing spurious cuts on a clean network.
             let mildRetrans = context.retransRatio > retransSlowDecreaseThreshold
             let mildRtt = context.rttRatio > rttSlowDecreaseRatio
-            if mildRetrans || mildRtt {
+            let strongRttStandalone = context.rttRatio > rttSlowDecreaseStandaloneRatio
+            let rttCorroborated = mildRtt &&
+                context.retransRatio > retransSlowDecreaseCorroborationThreshold
+            if mildRetrans || strongRttStandalone || rttCorroborated {
                 // Pressure veto: if we're well below recentPeakBps,
                 // the link clearly has room and a cut here would lock
                 // us low.
