@@ -409,7 +409,7 @@ class SrtSender: @unchecked Sendable {
         return writer.data
     }
 
-    private func createConclusionHandshakePacket(peerSocketId: UInt32, synCookie: UInt32) -> Data {
+    private func createConclusionHandshakePacket(synCookie: UInt32) -> Data {
         let writer = ByteWriter()
         writer.writeBytes(createCommonControlPacketHeader(type: .handshake,
                                                           typeSpecificInformation: 0,
@@ -422,7 +422,7 @@ class SrtSender: @unchecked Sendable {
         writer.writeUInt32(srtMaximumTransmissionUnitSize)
         writer.writeUInt32(srtMaximumFlowWindowSizeInPackets)
         writer.writeUInt32(HandshakeType.conclusion.rawValue)
-        writer.writeUInt32(peerSocketId)
+        writer.writeUInt32(srtSocketId)
         writer.writeUInt32(synCookie)
         writer.writeBytes(Data([1, 0, 0, 127,
                                 0, 0, 0, 0,
@@ -496,11 +496,8 @@ class SrtSender: @unchecked Sendable {
         }
     }
 
-    private func handleHandshakeInduction(peerSocketId: UInt32, synCookie: UInt32) {
-        outputPacket(packet: createConclusionHandshakePacket(
-            peerSocketId: peerSocketId,
-            synCookie: synCookie
-        ))
+    private func handleHandshakeInduction(peerSocketId _: UInt32, synCookie: UInt32) {
+        outputPacket(packet: createConclusionHandshakePacket(synCookie: synCookie))
     }
 
     private func handleHandshakeConclusion(peerSocketId: UInt32) {
