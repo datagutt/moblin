@@ -135,15 +135,17 @@ class SrtDataPacket {
     }
 
     fileprivate func setHeader(sequenceNumber: UInt32,
+                               messageNumber: UInt32,
                                now: ContinuousClock.Instant,
                                timestamp: UInt32,
                                destinationSrtSocketId: UInt32)
     {
         self.sequenceNumber = sequenceNumber
         createdAt = now
+        let messageNumberField: UInt32 = 0xE000_0000 | (messageNumber & 0x03FF_FFFF)
         data.withUnsafeMutableBytes { (pointer: UnsafeMutableRawBufferPointer) in
             pointer.writeUInt32(sequenceNumber, offset: 0)
-            pointer.writeUInt32(0xE000_0001, offset: 4)
+            pointer.writeUInt32(messageNumberField, offset: 4)
             pointer.writeUInt32(timestamp, offset: 8)
             pointer.writeUInt32(destinationSrtSocketId, offset: 12)
         }
@@ -177,6 +179,7 @@ private enum HandshakeType: UInt32 {
 class SrtSender: @unchecked Sendable {
     weak var delegate: (any SrtSenderDelegate)?
     private var nextSequenceNumber: UInt32 = .random(in: 0 ..< 10000)
+    private var nextMessageNumber: UInt32 = 1
     private var peerDestinationSrtSocketId: UInt32 = 0
     private let streamId: String?
     private let experimental: Bool
@@ -248,6 +251,7 @@ class SrtSender: @unchecked Sendable {
             packet.containsAudio = true
         }
         packet.setHeader(sequenceNumber: getNextSequenceNumber(),
+                         messageNumber: getNextMessageNumber(),
                          now: now,
                          timestamp: clock.timestamp(now: now),
                          destinationSrtSocketId: peerDestinationSrtSocketId)
@@ -385,6 +389,16 @@ class SrtSender: @unchecked Sendable {
             nextSequenceNumber &+= 1
         }
         return nextSequenceNumber
+    }
+
+    private func getNextMessageNumber() -> UInt32 {
+        defer {
+            nextMessageNumber = (nextMessageNumber &+ 1) & 0x03FF_FFFF
+            if nextMessageNumber == 0 {
+                nextMessageNumber = 1
+            }
+        }
+        return nextMessageNumber
     }
 
     private func createInductionHandshakePacket() -> Data {
