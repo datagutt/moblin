@@ -431,7 +431,7 @@ class SrtSender: @unchecked Sendable {
                                                           destinationSocketId: srtDestinationSocket))
         writer.writeUInt32(srtHandshakeVersion5)
         writer.writeUInt16(0)
-        writer.writeUInt16(5)
+        writer.writeUInt16(streamId != nil ? 5 : 1)
         writer.writeUInt32(nextSequenceNumber)
         writer.writeUInt32(srtMaximumTransmissionUnitSize)
         writer.writeUInt32(srtMaximumFlowWindowSizeInPackets)
